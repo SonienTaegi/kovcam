@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>꼬부 캠</title>
+<script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jquery/2.1.3/jquery.min.js"></script>
+<script type="text/javascript" src="http://bkw.github.io/Broadway/sylvester.js"></script>
+<script type="text/javascript" src="http://bkw.github.io/Broadway/glUtils.js"></script>
+<script type="text/javascript" src="http://bkw.github.io/Broadway/util.js"></script>
+<script type="text/javascript" src="http://bkw.github.io/Broadway/stream.js"></script>
+<script type="text/javascript" src="http://bkw.github.io/Broadway/worker.js"></script>
+<script type="text/javascript" src="http://bkw.github.io/Broadway/avc-codec.js"></script>
+<script type="text/javascript" src="http://bkw.github.io/Broadway/avc.js"></script>
+<script type="text/javascript" src="http://bkw.github.io/Broadway/mp4.js"></script>
+<script type="text/javascript" src='http://bkw.github.io/Broadway/canvas.js'></script>
+
+<script type="text/javascript">
+var FrameBuffer = function(rawBuffer) {
+	return {
+		raw 	: rawBuffer,
+		data 	: new Uint8Array(rawBuffer),
+		size 	: 0,
+		clear 	: function() {
+			this.size = 0;
+		},
+		append : function(array) {
+			// console.log(this.size + " / " + this.data.length + " < " + array.length);
+			this.data.set(array, this.size);
+			this.size += array.length;
+		},
+		getView : function() {
+			return new Uint8Array(this.raw, 0, this.size);
+		}
+	}
+}
+
+var JSMP = "jsmp";
+var avc, ws, gl;
+var frameBuffer = new FrameBuffer(new ArrayBuffer(512 * 1024));
+
+var ready = function() {	
+	// Websocket 연결
+	ws = new WebSocket('ws://sonien.net:8410');
+    ws.binaryType = 'arraybuffer';
+    ws.onmessage = onRecvPacket;	
+}
+
+var onRecvPacket = function(message) {
+	console.log("[INFO] onRecvPacket " + length + "b");
+	var view = new Uint8Array(message.data);
+	if(view.length == 8 &&
+		view[0] == JSMP.charCodeAt(0) && 
+		view[1] == JSMP.charCodeAt(1) && 
+		view[2] == JSMP.charCodeAt(2) && 
+		view[3] == JSMP.charCodeAt(3) ) {
+		
+		// 초기화
+		frameBuffer.clear();
+		initializeCanvas(view[4] * 256 + view[5], view[6] * 256 + view[7]);
+		return;
+	}
+	
+	// NAL 이면 직전 프레임 받은 내용 디코딩 수행
+	if(view[0] == 0x00 && view[1] == 0x00 && view[2] == 0x00 && frameBuffer.size != 0) {
+		var bufferView = frameBuffer.getView(); 
+		// console.log("NAL TYPE : " + bufferView[3] + " | " + bufferView[4] + " | " + bufferView[5]);
+		var start = new Date();
+		avc.decode(bufferView);
+		var fin = new Date();
+		console.log((fin.getTime() - start.getTime()) + " ms - decode");
+		frameBuffer.clear();
+	}
+	
+	frameBuffer.append(view);
+}
+
+var fps = 0;
+var initializeCanvas = function(width, height) {
+	var canvas = document.getElementById("kovcam");
+	canvas.width = width;
+	canvas.height = height;
+	
+	gl = new YUVWebGLCanvas(canvas, new Size(width, height));
+	avc = new Avc();
+	avc.onPictureDecoded = function(buffer, width, height) {
+		if (!buffer) {
+            return;
+        }
+		
+		fps++;
+		var lumaSize = width * height;
+        var chromaSize = lumaSize >> 2;
+
+        var start = new Date();
+        gl.YTexture.fill(buffer.subarray(0, lumaSize));
+        gl.UTexture.fill(buffer.subarray(lumaSize, lumaSize + chromaSize));
+        gl.VTexture.fill(buffer.subarray(lumaSize + chromaSize, lumaSize + 2 * chromaSize));
+        gl.drawScene();
+        var fin = new Date();
+		console.log((fin.getTime() - start.getTime()) + " ms - draw");
+	}
+	
+	window.setInterval(function() {
+		$("#fps").text("FPS : " + fps);
+		fps = 0;
+	}, 1000);
+}
+</script>
+</head>
+
+<body onload="ready()">
+
+<div style="margin : 0 auto;" align="center">
+	<p id="fps"></p>
+	<canvas id="kovcam">
+	</canvas>
+</div>
+</body>
+</html>
+

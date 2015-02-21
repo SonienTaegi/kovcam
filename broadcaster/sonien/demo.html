@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>WebSocket Broadcaster Demo</title>
+
+<script type="text/javascript">
+var ready = function() {	
+	// Websocket 연결
+	ws = new WebSocket('ws://localhost:8088');
+    ws.binaryType = 'arraybuffer';
+    ws.onmessage = onRecvPacket;	
+}
+
+var onRecvPacket = function(message) {
+	var view = new Uint8Array(message.data);
+	console.log(view);
+}
+
+</script>
+</head>
+
+<body onload="ready()">
+</body>
+</html>
+

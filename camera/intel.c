@@ -13,14 +13,6 @@
 #include <arm_neon.h>
 #endif
 
-typedef
-#ifdef __ARM_NEON__
-		unsigned char
-#else
-		unsigned int
-#endif
-		MD_ACCUM;
-//
 unsigned int WIDTH;
 unsigned int HEIGHT;
 unsigned int FRAMERATE;
@@ -30,7 +22,6 @@ unsigned int md_window_size;
 unsigned int md_frame_filled;
 unsigned int md_frame_index;
 unsigned char** md_frame_array;
-MD_ACCUM* md_accum;
 
 /* Performance measurer */
 struct timespec ts_checkAt;
@@ -68,9 +59,6 @@ void moving_detection_init(unsigned int window_size) {
 	for(int i = 0; i < window_size; i++) {
 		md_frame_array[i] = malloc(WIDTH * HEIGHT);
 	}
-	md_accum = malloc(sizeof(MD_ACCUM) * WIDTH * HEIGHT);
-
-	printf("md_avg_shift = %d\n", md_avg_shift);
 }
 
 void moving_detection_close() {
@@ -89,29 +77,13 @@ unsigned int moving_detection_check(unsigned char* frame) {
 	if(md_frame_filled == md_window_size) {
 	// 직전 8 프레임의 이미지 합을 구한다.
  #ifdef __ARM_NEON__
-
-//		uint16x8_t sum[16];
 		for(int i = 0; i < WIDTH * HEIGHT ; i += 8) {
-/*
-			int sum_index = 0;
-			for(int j = 0; j < md_window_size; j+=2) {
-				uint8x8_t a = vld1_u8(md_frame_array[j+0]+i);
-				uint8x8_t b = vld1_u8(md_frame_array[j+1]+i);
-				sum[sum_index++] = vaddl_u8(a, b);
-			}
-			
-			sum_index--;
-			for(int j = 0; j < sum_index; j+=2) {
-				sum[++sum_index] = vaddq_u16(sum[j], sum[j+1]);
-			}
-*/
-//			uint8x8_t avg = vqshrn_n_u16(sum[sum_index], /*md_avg_shift*/3);
 			uint16x8_t sum = { 0 };
 			for(int j = 0; j < md_window_size; j++) {
 				sum = vaddw_u8(sum, vld1_u8(md_frame_array[j]+i));
 			}
 			uint8x8_t avg = vqshrn_n_u16(sum, 3);
-//			vst1_u8(md_accum + i, avg);
+
 			uint16x8_t diff_sum_t = { 0 };
 			for(int j = 0; j < md_window_size; j++) {
 				diff_sum_t = vabal_u8(diff_sum_t, avg, vld1_u8(frame+i));
@@ -132,33 +104,9 @@ unsigned int moving_detection_check(unsigned char* frame) {
 			for(int i = 0; i < md_window_size; i++) {
 				sum += *(md_frame_array[i]+x);
 			}
-			md_accum[x] = sum >> md_avg_shift;
-		}
-#endif
 
-	// 오차의 절대값의 합을 구한다.
-#ifdef __ARM_NEON__
-/*
-		uint16x8_t diff_sum_t;
-		memset(&diff_sum_t, 0x00, sizeof(diff_sum_t));
-		for(int x = 0; x < WIDTH * HEIGHT; x+=8 ) {
-			uint8x8_t a = vld1_u8(md_accum+x);
-			uint8x8_t b = vld1_u8(frame+x);
-			diff_sum_t = vabal_u8(diff_sum_t, a, b);
-		}
-
-		diff_sum += vgetq_lane_u16(diff_sum_t, 0);
-		diff_sum += vgetq_lane_u16(diff_sum_t, 1);
-		diff_sum += vgetq_lane_u16(diff_sum_t, 2);
-		diff_sum += vgetq_lane_u16(diff_sum_t, 3);
-		diff_sum += vgetq_lane_u16(diff_sum_t, 4);
-		diff_sum += vgetq_lane_u16(diff_sum_t, 5);
-		diff_sum += vgetq_lane_u16(diff_sum_t, 6);
-		diff_sum += vgetq_lane_u16(diff_sum_t, 7);
-*/
-#else
-		for(int x = 0; x < WIDTH * HEIGHT; x++) {
-			diff_sum += abs((int)(md_accum[x] - frame[x]));
+			// 오차의 절대값의 합을 구한다.
+			diff_sum += abs((int)((sum >> md_avg_shift) - frame[x]));
 		}
 #endif
 	}

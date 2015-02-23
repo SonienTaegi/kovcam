@@ -27,6 +27,7 @@
 #include <linux/videodev2.h>
 #include <semaphore.h>
 
+#include "intel.h"
 #include "v4l2sonien.h"
 #include "x264sonien.h"
 #include "CircularQueue.h"
@@ -96,12 +97,14 @@ void* thread_fps(void* data) {
 }
 
 void* thread_encoder(void* data) {
-	// int fd_demo = open("demo.h264", O_RDWR | O_CREAT | O_TRUNC, 0644);
-
 	struct v4l2_buffer buffer;
 	memset(&buffer, 0x00, sizeof(buffer));
 	buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 	buffer.memory = V4L2_MEMORY_MMAP;
+
+	// Prepare moving detection
+	intel_init(mContext.width, mContext.height, mContext.fps);
+	moving_detection_init(8);
 
 	x264_init(mContext.width, mContext.height, mContext.fps);
 
@@ -109,13 +112,7 @@ void* thread_encoder(void* data) {
 	int num_of_nals;
 	x264_get_sps_pps(&nals, &num_of_nals);
 	for(int j = 0; j < num_of_nals; j++) {
-		// write(fd_demo, nals[j].p_payload, nals[j].i_payload);
 		CBput(mContext.pCB_stream_Out, nals[j].p_payload, nals[j].i_payload);
-		//printf("NAL TYPE : %02x / %d bytes\n", *(nals[j].p_payload+4), nals[j].i_payload);
-		//for(int i = 0; i < nals[j].i_payload; i++) {
-		//	printf("%02x", *(nals[j].p_payload+i));
-		//}
-		//printf("\n\n");
 	}
 
 	printf("Start of encoding\n");
@@ -128,10 +125,12 @@ void* thread_encoder(void* data) {
 			convert_yuv422_to_i420(pBuffer->ptr, i420, mContext.width, mContext.height);
 		}
 
+		// Moving Detection
+		if(moving_detection_check(i420) > mContext.width * mContext.height / 16) {
+			memset(i420, 0xdd, mContext.width * mContext.height);
+		}
 		int encoded_frame_size = x264_encode(i420, &p_encoded_frame);
 		if(encoded_frame_size) {
-			// printf("encoded : %d bytes\n", encoded_frame_size);
-			// write(fd_demo, p_encoded_frame->p_payload, encoded_frame_size);
 			CBput(mContext.pCB_stream_Out, p_encoded_frame->p_payload, encoded_frame_size);
 		}
 		buffer.index = pBuffer - mContext.buffer_pool;
@@ -141,7 +140,9 @@ void* thread_encoder(void* data) {
 		}
 	}
 	x264_close();
-	// close(fd_demo);
+
+	// Finish moving detection
+	moving_detection_close();
 }
 
 void* thread_stream(void* data) {
@@ -285,13 +286,11 @@ int main(int argc, char **argv) {
 	// pthread_t pt_fps;
 	// pthread_create(&pt_fps, NULL, thread_fps, NULL);
 
-
 	// Set signal interrupt handler
 	signal(SIGINT, 	onSignal);
 	signal(SIGTSTP, onSignal);
 	signal(SIGTERM, onSignal);
 
-	// for(int i = 0; mContext.isValidProcess && i < 100; i++) {
 	while(!mContext.isTerminated) {
 		// Stream 대기
 		fd_set selector;
@@ -341,7 +340,6 @@ int main(int argc, char **argv) {
 			}
 		}
 		mContext.frames_captured++;
-
 		CQput(mContext.pCQ_encoder_In, mContext.buffer_pool + buffer.index);
 		sem_post(&mContext.sem_encoder);
 	}

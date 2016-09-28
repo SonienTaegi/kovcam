@@ -1,10 +1,3 @@
-/*
- * h264sonien.h
- *
- *  Created on: 2015. 1. 28.
- *      Author: SDS
- */
-
 #ifndef SRC_X264SONIEN_H_
 #define SRC_X264SONIEN_H_
 
